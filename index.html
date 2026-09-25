@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BridgeBack</title>
+<meta name="description" content="Rough-edit an image, then hand it back to your AI image session with a marked-up copy and a prompt it can follow.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="6.2"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><path d="M12 1.5v5.2M12 17.3v5.2M1.5 12h5.2M17.3 12h5.2"/></svg>
+      <span class="wordmark">Bridge<b>Back</b></span>
+    </div>
+    <div class="top-group">
+      <button class="btn" id="btn-open" type="button" title="Open an image (Ctrl+O). You can also paste or drop one.">Open</button>
+      <button class="btn" id="btn-recent" type="button" aria-expanded="false" aria-controls="recent-pop">Recent</button>
+    </div>
+    <div class="top-group">
+      <button class="icon-btn" id="btn-undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5L4 10l5 5"/><path d="M4 10h10.5a5.5 5.5 0 010 11H11"/></svg></span></button>
+      <button class="icon-btn" id="btn-redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l5 5-5 5"/><path d="M20 10H9.5a5.5 5.5 0 000 11H13"/></svg></span></button>
+      <button class="btn" id="btn-compare" type="button" aria-pressed="false" title="Hold to see the original (hold \)">Compare</button>
+      <button class="btn" id="btn-outlines" type="button" aria-pressed="true" title="Show outlines and numbers (O)">Outlines</button>
+    </div>
+    <div class="top-end">
+      <button class="icon-btn" id="btn-help" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><span class="qmark">?</span></button>
+      <button class="btn primary" id="btn-handoff" type="button"><span id="handoff-label">Copy for AI</span><span class="kbd">Ctrl ⇧ C</span></button>
+    </div>
+  </header>
+
+  <nav class="toolrail" id="toolrail" aria-label="Tools"></nav>
+
+  <main class="stage" id="stage">
+    <canvas id="view" aria-label="Image editor canvas"></canvas>
+    <div class="toolopts" id="toolopts"></div>
+    <div class="compare-flag" id="compare-flag" hidden>Original</div>
+    <div class="stage-foot">
+      <div class="docinfo" id="docinfo"></div>
+      <div class="zoom" aria-label="Zoom">
+        <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+        <button type="button" id="zoom-level" title="Zoom to 100% (1)">100%</button>
+        <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" id="zoom-fit" title="Fit to screen (0)">Fit</button>
+      </div>
+    </div>
+    <div class="empty" id="empty">
+      <div>
+        <h2>Paste, drop or open an image</h2>
+        <p>Rough it up here, then send it back to your AI chat with notes it can follow.</p>
+        <div class="row">
+          <button class="btn primary" id="empty-open" type="button">Open image</button>
+          <button class="btn" id="empty-sample" type="button">Try the sample</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="panel" id="panel" aria-label="Edit settings">
+    <div class="tabs" role="tablist" id="tabs">
+      <button type="button" role="tab" id="t-adjust" data-tab="adjust" aria-selected="true" aria-controls="tab-adjust">Adjust</button>
+      <button type="button" role="tab" id="t-direction" data-tab="direction" aria-selected="false" aria-controls="tab-direction" tabindex="-1">Direction</button>
+      <button type="button" role="tab" id="t-regions" data-tab="regions" aria-selected="false" aria-controls="tab-regions" tabindex="-1">Regions <span class="count" id="region-count">0</span></button>
+      <button type="button" role="tab" id="t-handoff" data-tab="handoff" aria-selected="false" aria-controls="tab-handoff" tabindex="-1">Handoff</button>
+    </div>
+    <section class="tabpanel" id="tab-adjust" role="tabpanel" aria-labelledby="t-adjust"></section>
+    <section class="tabpanel" id="tab-direction" role="tabpanel" aria-labelledby="t-direction" hidden></section>
+    <section class="tabpanel" id="tab-regions" role="tabpanel" aria-labelledby="t-regions" hidden></section>
+    <section class="tabpanel" id="tab-handoff" role="tabpanel" aria-labelledby="t-handoff" hidden></section>
+  </aside>
+</div>
+
+<input type="file" id="file-input" accept="image/*" hidden>
+<div class="popover" id="recent-pop" hidden></div>
+<div class="dropzone" id="dropzone" hidden><div>Drop to open this image</div></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div class="overlay" id="help" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="sheet-head">
+      <h2 id="help-title">How BridgeBack works</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></button>
+    </div>
+    <p>Paste the image your AI made. Mark what should change, rough it up with the sliders, then press Copy for AI and paste each piece into the chat. The edit only has to be clear. The AI does the clean render.</p>
+    <dl class="keys">
+      <dt><kbd>Ctrl</kbd> <kbd>V</kbd></dt><dd>Open the image on your clipboard</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>C</kbd></dt><dd>Copy the next piece of the handoff</dd>
+      <dt><kbd>V</kbd> <kbd>L</kbd> <kbd>E</kbd> <kbd>M</kbd></dt><dd>Move, lasso, ellipse, rectangle</dd>
+      <dt><kbd>W</kbd> <kbd>P</kbd> <kbd>H</kbd></dt><dd>Magic wand, marker, pan</dd>
+      <dt><kbd>⇧</kbd> / <kbd>Alt</kbd> + drag</dt><dd>Add to or subtract from the selected area</dd>
+      <dt><kbd>Space</kbd> + drag</dt><dd>Pan from any tool</dd>
+      <dt>Hold <kbd>\</kbd></dt><dd>Compare with the original</dd>
+      <dt><kbd>O</kbd></dt><dd>Show or hide outlines</dd>
+      <dt><kbd>0</kbd> / <kbd>1</kbd></dt><dd>Fit to screen / 100%</dd>
+      <dt>Arrows</dt><dd>Nudge the selected area (Shift for 10 px)</dd>
+      <dt><kbd>Del</kbd></dt><dd>Delete the selected area or marker</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo (add Shift to redo)</dd>
+      <dt>Double-click a slider label</dt><dd>Reset it</dd>
+    </dl>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
