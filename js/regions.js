@@ -127,14 +127,14 @@ export function wandMask(img, sx, sy, tol, contiguous) {
   const { width: W, height: H, data: d } = img;
   if (sx < 0 || sy < 0 || sx >= W || sy >= H) return null;
   const i0 = (sy * W + sx) * 4;
-  const r0 = d[i0], g0 = d[i0 + 1], b0 = d[i0 + 2];
+  const r0 = d[i0], g0 = d[i0 + 1], b0 = d[i0 + 2], a0 = d[i0 + 3];
   const t = (tol / 100) * 441.7;
   const t2 = t * t;
   const sel = new Uint8Array(W * H);
   const match = (p) => {
     const j = p * 4;
-    const dr = d[j] - r0, dg = d[j + 1] - g0, db = d[j + 2] - b0;
-    return dr * dr + dg * dg + db * db <= t2;
+    const dr = d[j] - r0, dg = d[j + 1] - g0, db = d[j + 2] - b0, da = d[j + 3] - a0;
+    return dr * dr + dg * dg + db * db + da * da * 2 <= t2;
   };
   if (contiguous) {
     const stack = new Int32Array(W * H);
@@ -182,6 +182,20 @@ export function wandMask(img, sx, sy, tol, contiguous) {
   }
   ctx.putImageData(out, 0, 0);
   return { id: uid(), x: minX, y: minY, w, h, canvas: c };
+}
+
+/** The region's mask as it sits now (moved, scaled, rotated), in image coords. */
+export function placedMask(r) {
+  if (!isMoved(r.ops)) return r.mask;
+  const c4 = corners(r);
+  const bx = Math.floor(Math.min(...c4.map((p) => p.x))) - 1, by = Math.floor(Math.min(...c4.map((p) => p.y))) - 1;
+  const bw = Math.ceil(Math.max(...c4.map((p) => p.x))) + 1 - bx, bh = Math.ceil(Math.max(...c4.map((p) => p.y))) + 1 - by;
+  const c = makeCanvas(bw, bh);
+  const x = c.getContext('2d');
+  x.translate(-bx, -by);
+  applyTransform(x, r);
+  x.drawImage(r.mask.canvas, r.mask.x, r.mask.y);
+  return makeMask(c, bx, by);
 }
 
 /** Map a mask drawn at a region's current (moved) position back into its original space. */
@@ -495,11 +509,15 @@ function fillHole(comp, m, mode) {
 }
 
 /** Draw `base` into `comp`, then apply every active region in order. */
-export function composite(comp, base, regions) {
+export function composite(comp, base, regions, matte) {
   const ctx = ctx2d(comp, true);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, comp.width, comp.height);
+  if (matte) {
+    ctx.fillStyle = matte;
+    ctx.fillRect(0, 0, comp.width, comp.height);
+  }
   ctx.drawImage(base, 0, 0);
   for (const r of regions) {
     if (!isActive(r)) continue;

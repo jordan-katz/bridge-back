@@ -10,11 +10,13 @@ The editing is crude on purpose. The AI does the clean render. BridgeBack's job 
 
 **Direction sliders (prompt only).** How closely to follow the edit, realism, detail, depth of field, lighting drama, mood, light direction, time of day and framing. Plus "keep exactly" checkboxes for faces, text, composition and art style, and a free-text note.
 
-**Regions.** Select with lasso, ellipse, rectangle or a magic wand (Shift adds, Alt subtracts). Each region gets a number, a note and its own edits: recolor (keeps shading), hue, saturation, brightness, scale, rotate, mirror, move, remove, and soft edges. When you move or remove something, the hole is filled from its surroundings as a placeholder and the prompt tells the model to fill it properly. Markers (P) mark a spot where something new should go.
+**Regions.** Select with lasso, ellipse, rectangle or a magic wand (hold Shift to add another piece to the selected area, Alt to cut one away). With the Move tool, Shift-click several areas to move them together or combine them into one area with one number and one note. Each region gets a number, a note and its own edits: recolor (keeps shading), hue, saturation, brightness, scale, rotate, mirror, move, remove, and soft edges. When you move or remove something, the hole is filled from its surroundings as a placeholder and the prompt tells the model to fill it properly. Markers (P) mark a spot where something new should go.
 
-**Handoff.** `Copy for AI` (Ctrl+Shift+C) copies the next piece each time you press it: rough edit, marked-up copy, prompt. Paste each into the chat. Options for including the original, combining everything into one labeled image, and Detailed, Short or JSON prompts. Everything can also be saved as files.
+**Handoff.** `Copy for AI` (Ctrl+Shift+C) copies the next piece each time you press it: rough edit, marked-up copy, prompt. Paste each into the chat. Options for including the original, combining everything into one labeled image, copying the prompt together with the marked-up copy in a single paste, and Detailed, Short or JSON prompts. Everything can also be saved as files.
 
-**Quality of life.** Paste or drop to open. Undo and redo. Hold `\` to compare with the original. Sessions autosave in the browser (IndexedDB), with the last eight images under Recent. Works on phones and tablets with touch and pinch zoom.
+**Transparent images.** Images with a transparent background are flattened onto white by default, since image models handle transparency unevenly. Pick gray, black, any color, or keep it transparent under Adjust. The prompt says which.
+
+**Quality of life.** Opens blank, with a Resume button for your last image. Paste or drop to open. Undo and redo. Hold `\` to compare with the original. Sessions autosave in the browser (IndexedDB), with the last eight images under Recent. Works on phones and tablets with touch and pinch zoom.
 
 ## Running it
 

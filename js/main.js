@@ -91,9 +91,10 @@ const defaultIntent = () => ({
 const S = { doc: null, global: defaultGlobal(), intent: defaultIntent(), regions: [], note: '' };
 const ui = {
   tool: store.prefs.get('tool', 'lasso'), selMode: 'new', wandTol: store.prefs.get('wandTol', 18), wandContig: true,
-  selectedId: null, tab: 'adjust', outlines: true, comparing: false, picking: null, spaceHeld: false,
+  selectedId: null, extra: new Set(), tab: 'adjust', outlines: true, comparing: false, picking: null, spaceHeld: false,
+  shiftHeld: false, altHeld: false,
 };
-const handoff = Object.assign({ original: false, annotated: true, combine: false, legend: true, style: 'detailed' }, store.prefs.get('handoff', {}));
+const handoff = Object.assign({ original: false, annotated: true, combine: false, legend: true, bundle: false, style: 'detailed' }, store.prefs.get('handoff', {}));
 let promptOverride = null;
 const copied = new Set();
 let version = 0;
@@ -108,6 +109,9 @@ const pointers = new Map();
 
 const byId = (id) => S.regions.find((r) => r.id === id);
 const selected = () => (ui.selectedId ? byId(ui.selectedId) : null);
+const isSel = (id) => id === ui.selectedId || ui.extra.has(id);
+const selectedIds = () => (ui.selectedId ? [ui.selectedId, ...ui.extra] : [...ui.extra]).filter((id) => byId(id));
+const multi = () => selectedIds().length > 1;
 const indexOf = (id) => S.regions.findIndex((r) => r.id === id);
 
 // ---------------------------------------------------------------- rendering
@@ -135,7 +139,7 @@ function tick() {
   frame = 0;
   if (S.doc) {
     if (compDirty) {
-      R.composite(comp, S.doc.base, S.regions);
+      R.composite(comp, S.doc.base, S.regions, matteColor());
       adjuster.upload(comp);
       compDirty = false;
       adjDirty = true;
@@ -236,6 +240,10 @@ function draw() {
   vx.scale(view.zoom, view.zoom);
   vx.imageSmoothingEnabled = view.zoom < 2;
   vx.imageSmoothingQuality = 'high';
+  if (ui.comparing && matteColor()) {
+    vx.fillStyle = matteColor();
+    vx.fillRect(0, 0, W, H);
+  }
   vx.drawImage(ui.comparing ? S.doc.base : adjuster.canvas, 0, 0);
   vx.restore();
   $('compare-flag').hidden = !ui.comparing;
@@ -272,7 +280,7 @@ function drawOverlays() {
   S.regions.forEach((r, i) => {
     if (r.kind === 'pin') return;
     const col = regionColor(i);
-    const sel = r.id === ui.selectedId;
+    const sel = isSel(r.id);
     const o = r.ops;
     const path = R.maskPath(r.mask);
     vx.save();
@@ -310,7 +318,7 @@ function drawOverlays() {
   });
   S.regions.forEach((r, i) => {
     const col = regionColor(i);
-    const sel = r.id === ui.selectedId;
+    const sel = isSel(r.id);
     if (r.kind === 'pin') {
       const p = toScreen(r.pin.x, r.pin.y);
       if (sel) {
@@ -331,7 +339,7 @@ function drawOverlays() {
     badge(vx, s.x, s.y - br - 3, br, i + 1, col);
   });
   const sel = selected();
-  if (sel && sel.kind === 'area' && !sel.ops.remove && ui.tool === 'move') drawHandles(sel);
+  if (sel && !multi() && sel.kind === 'area' && !sel.ops.remove && ui.tool === 'move') drawHandles(sel);
 }
 
 function handlePts(r) {
@@ -412,6 +420,26 @@ function drawDragPreview() {
 
 // ---------------------------------------------------------------- documents
 
+const MATTES = [['#ffffff', 'White'], ['#808080', 'Gray'], ['#000000', 'Black'], ['transparent', 'Keep transparent']];
+const matteColor = () => (S.doc?.hasAlpha && S.doc.matte && S.doc.matte !== 'transparent' ? S.doc.matte : null);
+
+function detectAlpha(c) {
+  const d = ctx2d(c, true).getImageData(0, 0, c.width, c.height).data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 250) return true;
+  return false;
+}
+
+function flattened(src) {
+  const c = copyCanvas(src);
+  const m = matteColor();
+  if (!m) return c;
+  const x = c.getContext('2d');
+  x.globalCompositeOperation = 'destination-over';
+  x.fillStyle = m;
+  x.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+
 function mkRegion(mask, { note = '', ops = {} } = {}) {
   return { id: uid(), kind: 'area', mask, pin: null, note, enabled: true, ops: { ...R.defaultOps(), ...ops } };
 }
@@ -427,6 +455,7 @@ function setDoc(doc, st = {}) {
   compDirty = true;
   compData = null;
   ui.selectedId = null;
+  ui.extra.clear();
   promptOverride = null;
   copied.clear();
   undoStack = [snap()];
@@ -451,8 +480,11 @@ async function openBlob(blob, name) {
     const bx = base.getContext('2d');
     bx.imageSmoothingQuality = 'high';
     bx.drawImage(img, 0, 0, base.width, base.height);
-    setDoc({ id: uid(), name: name || 'Pasted image', base, W: base.width, H: base.height, origW, origH, touched: true });
-    toast(`Opened ${name || 'pasted image'}.`);
+    const hasAlpha = detectAlpha(base);
+    setDoc({ id: uid(), name: name || 'Pasted image', base, W: base.width, H: base.height, origW, origH, touched: true, hasAlpha, matte: '#ffffff' });
+    toast(hasAlpha
+      ? 'This image has a transparent background. It is shown on white, and you can change that at the top of Adjust.'
+      : `Opened ${name || 'pasted image'}.`);
     saveSoon.flush();
   } catch (e) {
     toast(e.message || 'Could not open that image.');
@@ -479,6 +511,7 @@ function loadSample() {
 function updateDocInfo() {
   const d = S.doc;
   const el = $('docinfo');
+  el.hidden = !d;
   if (!d) {
     el.textContent = '';
     return;
@@ -528,6 +561,7 @@ function restore(s) {
   S.note = s.note;
   S.regions = s.regions.map((r) => ({ ...r, ops: { ...r.ops }, pin: r.pin ? { ...r.pin } : null }));
   if (!byId(ui.selectedId)) ui.selectedId = null;
+  for (const id of [...ui.extra]) if (!byId(id)) ui.extra.delete(id);
   buildAdjust();
   buildDirection();
   renderRegions();
@@ -581,6 +615,7 @@ async function saveNow() {
   );
   await store.put({
     id: d.id, name: d.name, updated: Date.now(), W: d.W, H: d.H, origW: d.origW, origH: d.origH, sample: !!d.sample,
+    hasAlpha: !!d.hasAlpha, matte: d.matte || '#ffffff',
     base: d.baseBlob, thumb,
     state: { global: { ...S.global }, intent: JSON.parse(JSON.stringify(S.intent)), note: S.note, regions },
   });
@@ -599,7 +634,10 @@ async function loadRecord(rec) {
     }))
   );
   setDoc(
-    { id: rec.id, name: rec.name, base, W: base.width, H: base.height, origW: rec.origW, origH: rec.origH, sample: rec.sample, touched: true, baseBlob: rec.base },
+    {
+      id: rec.id, name: rec.name, base, W: base.width, H: base.height, origW: rec.origW, origH: rec.origH, sample: rec.sample, touched: true, baseBlob: rec.base,
+      hasAlpha: rec.hasAlpha ?? detectAlpha(base), matte: rec.matte || '#ffffff',
+    },
     { global: rec.state.global, intent: rec.state.intent, note: rec.state.note, regions }
   );
   store.prefs.set('lastDoc', rec.id);
@@ -668,6 +706,30 @@ function panelHead(title, onReset) {
 
 // ---------------------------------------------------------------- panels: adjust + direction
 
+function backgroundGroup() {
+  const d = S.doc;
+  const custom = h('input', { type: 'color', id: 'matte-custom', 'aria-label': 'Other background color', title: 'Other color' });
+  custom.value = d.matte && d.matte.startsWith('#') ? d.matte : '#ffffff';
+  const setMatte = (v) => {
+    d.matte = v;
+    d.touched = true;
+    compDirty = true;
+    invalidate();
+    saveSoon();
+  };
+  custom.addEventListener('input', () => {
+    setMatte(custom.value);
+    document.querySelectorAll('#matte-seg .seg-btn').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.v === custom.value)));
+  });
+  const seg = segmented('Background', MATTES, d.matte, (v) => setMatte(v));
+  seg.id = 'matte-seg';
+  return h('div', { class: 'group' },
+    h('div', { class: 'group-label' }, 'Transparent background'),
+    h('div', { class: 'row' }, seg, h('label', { class: 'check', for: 'matte-custom' }, custom, h('span', null, 'Other'))),
+    h('p', { class: 'help' }, 'Image models handle transparency unevenly, so the rough edit is flattened onto this color. Keep transparent sends it as is.')
+  );
+}
+
 function buildAdjust() {
   const p = $('tab-adjust');
   put(p, 
@@ -679,6 +741,7 @@ function buildAdjust() {
       commit();
     }),
     h('p', { class: 'help' }, 'These change the rough edit you send, and the prompt describes them so the AI keeps the look.'),
+    S.doc?.hasAlpha ? backgroundGroup() : null,
     h('div', { class: 'sliders' },
       GLOBAL_DEFS.map((d) =>
         slider({
@@ -777,9 +840,12 @@ function renderRegionList() {
   $('region-count').textContent = S.regions.length;
   put(regionListEl, 
     ...S.regions.map((r, i) => {
-      const sel = r.id === ui.selectedId;
+      const sel = isSel(r.id);
       return h('li', { class: 'region-item' + (sel ? ' is-selected' : '') + (r.enabled ? '' : ' is-off') },
-        h('button', { type: 'button', class: 'region-pick', 'aria-pressed': String(sel), onclick: () => select(sel ? null : r.id) },
+        h('button', {
+          type: 'button', class: 'region-pick', 'aria-pressed': String(sel), title: 'Shift-click to select several',
+          onclick: (e) => (e.shiftKey ? toggleExtra(r.id) : select(sel && !multi() ? null : r.id)),
+        },
           h('span', { class: 'num', style: { '--c': regionColor(i) } }, i + 1),
           h('span', { class: 'region-text' },
             h('span', { class: 'region-kind' }, r.kind === 'pin' ? 'Marker' : 'Area'),
@@ -833,8 +899,33 @@ function noteField(r) {
   );
 }
 
+function renderMultiEditor(ids) {
+  const regs = ids.map(byId);
+  const areas = regs.filter((r) => r.kind === 'area');
+  const pins = regs.length - areas.length;
+  put(regionEditorEl,
+    h('div', { class: 'editor-head' },
+      h('div', { class: 'num-row' }, regs.map((r) => h('span', { class: 'num', style: { '--c': regionColor(indexOf(r.id)) } }, indexOf(r.id) + 1))),
+      h('h3', null, `${regs.length} selected`),
+      h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Clear selection', title: 'Deselect (Esc)', onclick: () => select(null) }, icon('close'))
+    ),
+    h('p', { class: 'help' },
+      areas.length >= 2
+        ? 'Combine them into one area so they share one number and one note. The combined area keeps the edits of the first one you picked.'
+        : 'Shift-click another area to add it to the group.'),
+    pins ? h('p', { class: 'help' }, `Markers stay separate. ${pins === 1 ? 'One marker is' : pins + ' markers are'} in this selection.`) : null,
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn accent', disabled: areas.length < 2, onclick: combineSelected }, `Combine ${areas.length >= 2 ? areas.length + ' areas' : 'areas'}`),
+      h('button', { type: 'button', class: 'btn', onclick: () => deleteRegions(ids) }, 'Delete all')
+    ),
+    h('p', { class: 'help' }, 'Drag any of them with Move (V) to move them together. Arrow keys nudge the group.')
+  );
+}
+
 function renderRegionEditor() {
   if (!regionEditorEl) return;
+  const ids = selectedIds();
+  if (ids.length > 1) return renderMultiEditor(ids);
   const r = selected();
   if (!r) {
     put(regionEditorEl, h('p', { class: 'help pad' }, 'Pick a region above or click one on the image with the Move tool (V) to edit it.'));
@@ -921,10 +1012,59 @@ function renderRegionEditor() {
 
 function select(id) {
   ui.selectedId = id;
+  ui.extra.clear();
   renderRegionList();
   renderRegionEditor();
   if (id && ui.tab !== 'regions') showTab('regions');
   schedule();
+}
+
+function toggleExtra(id) {
+  if (!ui.selectedId) return select(id);
+  if (id === ui.selectedId) {
+    const next = [...ui.extra][0] || null;
+    if (next) ui.extra.delete(next);
+    ui.selectedId = next;
+  } else if (ui.extra.has(id)) ui.extra.delete(id);
+  else ui.extra.add(id);
+  renderRegionList();
+  renderRegionEditor();
+  if (ui.tab !== 'regions') showTab('regions');
+  schedule();
+}
+
+function combineSelected() {
+  const ids = selectedIds();
+  const areas = ids.map(byId).filter((r) => r.kind === 'area');
+  if (areas.length < 2) return;
+  const base = areas[0];
+  let mask = base.mask;
+  for (const r of areas.slice(1)) {
+    const local = R.toRegionSpace(base, R.placedMask(r));
+    if (local) mask = R.combineMasks(mask, local, 'add') || mask;
+  }
+  const notes = areas.map((r) => (r.note || '').trim()).filter(Boolean);
+  base.mask = mask;
+  base.note = notes.join('; ');
+  const drop = new Set(areas.slice(1).map((r) => r.id));
+  S.regions = S.regions.filter((r) => !drop.has(r.id));
+  ui.extra.clear();
+  ui.selectedId = base.id;
+  invalidate();
+  renderRegions();
+  commit();
+  toast(`Combined ${areas.length} areas into one. Add the note for all of them.`);
+  focusNote();
+}
+
+function deleteRegions(ids) {
+  const set = new Set(ids);
+  S.regions = S.regions.filter((r) => !set.has(r.id));
+  ui.selectedId = null;
+  ui.extra.clear();
+  invalidate();
+  renderRegions();
+  commit();
 }
 
 function focusNote() {
@@ -934,6 +1074,7 @@ function focusNote() {
 
 function deleteRegion(id) {
   S.regions = S.regions.filter((r) => r.id !== id);
+  ui.extra.delete(id);
   if (ui.selectedId === id) ui.selectedId = null;
   invalidate();
   renderRegions();
@@ -1048,6 +1189,13 @@ function setTool(id) {
   schedule();
 }
 
+const effectiveMode = () => (ui.shiftHeld ? 'add' : ui.altHeld ? 'sub' : ui.selMode);
+
+function showModifierMode() {
+  const m = effectiveMode();
+  document.querySelectorAll('#toolopts .seg-btn').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.v === m)));
+}
+
 function renderToolOpts() {
   const el = $('toolopts');
   if (ui.picking) {
@@ -1057,7 +1205,7 @@ function renderToolOpts() {
   const t = ui.tool;
   if (['lasso', 'ellipse', 'rect', 'wand'].includes(t)) {
     const kids = [
-      segmented('Selection mode', [['new', 'New'], ['add', 'Add'], ['sub', 'Subtract']], ui.selMode, (v) => { ui.selMode = v; }),
+      segmented('Selection mode', [['new', 'New'], ['add', 'Add'], ['sub', 'Subtract']], effectiveMode(), (v) => { ui.selMode = v; }),
     ];
     if (t === 'wand') {
       const s = slider({
@@ -1067,13 +1215,13 @@ function renderToolOpts() {
       s.el.classList.add('compact');
       kids.push(s.el, checkbox('wand-contig', 'Connected only', ui.wandContig, (v) => { ui.wandContig = v; }));
     } else {
-      kids.push(h('span', { class: 'opt-hint' }, t === 'lasso' ? 'Draw around it freehand.' : 'Drag to select. Click an area to pick it.'));
+      kids.push(h('span', { class: 'opt-hint' }, 'Hold Shift to add another piece to the selected area, Alt to cut one away.'));
     }
     put(el, ...kids);
     return;
   }
   const hints = {
-    move: 'Drag an area to move it. Corners scale, the round handle rotates (Shift snaps). Arrow keys nudge.',
+    move: 'Drag to move. Shift-click to pick several parts, then combine them under one note.',
     pin: 'Click where something new should go, then describe it.',
     hand: 'Drag to pan. Scroll or pinch to zoom.',
   };
@@ -1136,7 +1284,7 @@ vc.addEventListener('pointerdown', (e) => {
   switch (ui.tool) {
     case 'move': {
       const sel = selected();
-      if (sel && sel.kind === 'area' && !sel.ops.remove) {
+      if (sel && !multi() && !e.shiftKey && sel.kind === 'area' && !sel.ops.remove) {
         const hnd = hitHandle(sel, p);
         if (hnd) {
           const c = handlePts(sel).center;
@@ -1147,13 +1295,19 @@ vc.addEventListener('pointerdown', (e) => {
         }
       }
       const hit = hitTest(p, ip);
-      if (hit) {
-        if (hit.id !== ui.selectedId) select(hit.id);
-        drag = hit.kind === 'pin'
-          ? { type: 'pin', id: hit.id, ox: hit.pin.x - ip.x, oy: hit.pin.y - ip.y, moved: false }
-          : { type: 'move', id: hit.id, sx: ip.x, sy: ip.y, dx0: hit.ops.dx, dy0: hit.ops.dy, moved: false };
+      if (hit && e.shiftKey) {
+        toggleExtra(hit.id);
+      } else if (hit) {
+        if (!isSel(hit.id)) select(hit.id);
+        drag = {
+          type: 'move', sx: ip.x, sy: ip.y, moved: false,
+          items: selectedIds().map((id) => {
+            const r = byId(id);
+            return r.kind === 'pin' ? { id, px: r.pin.x, py: r.pin.y } : { id, dx0: r.ops.dx, dy0: r.ops.dy };
+          }),
+        };
       } else {
-        if (ui.selectedId) select(null);
+        if (ui.selectedId && !e.shiftKey) select(null);
         startPan(p);
       }
       break;
@@ -1204,21 +1358,20 @@ vc.addEventListener('pointermove', (e) => {
       view.fitted = false;
       break;
     case 'move': {
-      const r = byId(drag.id);
-      if (!r) break;
-      r.ops.dx = Math.round(drag.dx0 + ip.x - drag.sx);
-      r.ops.dy = Math.round(drag.dy0 + ip.y - drag.sy);
+      const ddx = ip.x - drag.sx, ddy = ip.y - drag.sy;
+      for (const it of drag.items) {
+        const r = byId(it.id);
+        if (!r) continue;
+        if (r.kind === 'pin') {
+          r.pin.x = Math.round(clamp(it.px + ddx, 0, W));
+          r.pin.y = Math.round(clamp(it.py + ddy, 0, H));
+        } else {
+          r.ops.dx = Math.round(it.dx0 + ddx);
+          r.ops.dy = Math.round(it.dy0 + ddy);
+        }
+      }
       drag.moved = true;
       invalidate();
-      break;
-    }
-    case 'pin': {
-      const r = byId(drag.id);
-      if (!r) break;
-      r.pin.x = Math.round(clamp(ip.x + drag.ox, 0, W));
-      r.pin.y = Math.round(clamp(ip.y + drag.oy, 0, H));
-      drag.moved = true;
-      changed();
       break;
     }
     case 'scale': {
@@ -1279,7 +1432,6 @@ function endPointer(e) {
       break;
     }
     case 'move':
-    case 'pin':
       if (d.moved) {
         commit();
         renderRegionEditor();
@@ -1328,8 +1480,26 @@ function steps() {
   if (handoff.combine && imgs.length > 1) list.push({ key: 'combined', label: NAMES.combined, sub: imgs.map((k) => PANEL[k]).join(' + ') });
   else imgs.forEach((k) => list.push({ key: k, label: NAMES[k], sub: sub[k] }));
   const words = currentPrompt().split(/\s+/).filter(Boolean).length;
-  list.push({ key: 'prompt', label: NAMES.prompt, sub: `${{ detailed: 'Detailed', short: 'Short', json: 'JSON' }[handoff.style]}, ${words} words` });
+  const promptSub = `${{ detailed: 'Detailed', short: 'Short', json: 'JSON' }[handoff.style]}, ${words} words`;
+  if (handoff.bundle) {
+    const last = list[list.length - 1];
+    last.key += '+prompt';
+    last.label = stepName(last.key);
+    last.sub = `One paste: image plus prompt (${promptSub.toLowerCase()})`;
+  } else {
+    list.push({ key: 'prompt', label: NAMES.prompt, sub: promptSub });
+  }
   return list;
+}
+
+const imgKey = (key) => key.replace('+prompt', '');
+const stepName = (key) => (key.endsWith('+prompt') ? `${NAMES[imgKey(key)]} with prompt` : NAMES[key]);
+
+function copyBundle(key) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return Promise.reject(new Error('no image clipboard'));
+  const img = Promise.resolve().then(() => canvasToBlob(makeImage(imgKey(key))));
+  const text = new Blob([currentPrompt()], { type: 'text/plain' });
+  return navigator.clipboard.write([new ClipboardItem({ 'image/png': img, 'text/plain': text })]);
 }
 
 function currentPrompt() {
@@ -1341,7 +1511,7 @@ function makeImage(key) {
   ensureRendered();
   const rough = copyCanvas(adjuster.canvas);
   if (key === 'rough') return rough;
-  if (key === 'original') return copyCanvas(S.doc.base);
+  if (key === 'original') return flattened(S.doc.base);
   if (key === 'annotated') return makeAnnotated(rough, S.regions, { legend: handoff.legend });
   if (key === 'combined') {
     const imgs = packetImages(handoff, S.regions.length);
@@ -1381,17 +1551,19 @@ async function copyStep(key) {
   const idx = st.findIndex((s) => s.key === key);
   try {
     if (key === 'prompt') await copyText(currentPrompt());
+    else if (key.endsWith('+prompt')) await copyBundle(key);
     else await copyImageTo(() => canvasToBlob(makeImage(key)));
     copied.add(key);
     const next = st.find((s) => !copied.has(s.key));
+    const bundleNote = key.endsWith('+prompt') ? ' If your chat keeps only the image, use Copy on the prompt too.' : '';
     toast(
       next
-        ? `Copied ${NAMES[key].toLowerCase()} (${idx + 1} of ${st.length}). Paste it into your chat, then copy the ${NAMES[next.key].toLowerCase()}.`
-        : `Copied ${NAMES[key].toLowerCase()}. That's the whole packet.`
+        ? `Copied ${stepName(key).toLowerCase()} (${idx + 1} of ${st.length}). Paste it into your chat, then copy the ${stepName(next.key).toLowerCase()}.`
+        : `Copied ${stepName(key).toLowerCase()}. That's the whole packet.${bundleNote}`
     );
   } catch (err) {
     console.warn('BridgeBack copy failed', err);
-    toast(`This browser blocked copying the ${NAMES[key].toLowerCase()}. Save it as a file instead.`, { label: 'Save', run: () => saveStep(key) });
+    toast(`This browser blocked copying the ${stepName(key).toLowerCase()}. Save it as a file instead.`, { label: 'Save', run: () => saveStep(key) });
   }
   renderSteps();
   updateHandoffButton();
@@ -1417,9 +1589,9 @@ function updateHandoffButton() {
   const st = steps();
   const nx = st.find((s) => !copied.has(s.key));
   if (!copied.size) label.textContent = 'Copy for AI';
-  else if (nx) label.textContent = `Copy ${NAMES[nx.key].toLowerCase()} (${st.indexOf(nx) + 1}/${st.length})`;
+  else if (nx) label.textContent = `Copy ${stepName(nx.key).toLowerCase()} (${st.indexOf(nx) + 1}/${st.length})`;
   else label.textContent = 'Copied. Start over';
-  $('btn-handoff').title = nx ? `Copies the ${NAMES[nx.key].toLowerCase()} (Ctrl+Shift+C)` : 'Copy the packet again (Ctrl+Shift+C)';
+  $('btn-handoff').title = nx ? `Copies the ${stepName(nx.key).toLowerCase()} (Ctrl+Shift+C)` : 'Copy the packet again (Ctrl+Shift+C)';
 }
 
 let dlCap = null;
@@ -1457,6 +1629,10 @@ async function saveStep(key) {
     const json = handoff.style === 'json';
     return saveBlob(new Blob([currentPrompt()], { type: 'text/plain' }), `${fileBase()}-prompt.${json ? 'json' : 'txt'}`);
   }
+  if (key.endsWith('+prompt')) {
+    await saveStep(imgKey(key));
+    return saveStep('prompt');
+  }
   const blob = await canvasToBlob(makeImage(key));
   return saveBlob(blob, `${fileBase()}-${key}.png`);
 }
@@ -1488,7 +1664,8 @@ function buildHandoff() {
         checkbox('h-annotated', 'Marked-up copy', handoff.annotated, setOpt('annotated'), 'Numbered outlines on each change'),
         checkbox('h-legend', 'Legend strip', handoff.legend, setOpt('legend'), 'Lists the changes under the marked-up copy'),
         checkbox('h-original', 'Original image', handoff.original, setOpt('original'), 'Useful when the chat never saw it'),
-        checkbox('h-combine', 'Combine into one image', handoff.combine, setOpt('combine'), 'For chats that take one image per message')
+        checkbox('h-combine', 'Combine into one image', handoff.combine, setOpt('combine'), 'For chats that take one image per message'),
+        checkbox('h-bundle', 'Copy the prompt with the last image', handoff.bundle, setOpt('bundle'), 'One paste carries the marked-up copy and the prompt that explains each marking. Some chats keep only the image.')
       )
     ),
     h('div', { class: 'group' },
@@ -1541,7 +1718,7 @@ function renderSteps() {
       else {
         let src = thumbs.map.get(s.key);
         if (!src) {
-          src = fitCanvas(makeImage(s.key), 180);
+          src = fitCanvas(makeImage(imgKey(s.key)), 180);
           thumbs.map.set(s.key, src);
         }
         thumb = makeCanvas(src.width, src.height);
@@ -1760,31 +1937,43 @@ function wire() {
 
   window.addEventListener('keydown', onKey);
   window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift' || e.key === 'Alt') {
+      ui.shiftHeld = e.shiftKey;
+      ui.altHeld = e.altKey;
+      showModifierMode();
+    }
     if (e.key === ' ') { ui.spaceHeld = false; updateCursor(); }
     if (e.key === '\\' && ui.comparing) { ui.comparing = false; $('btn-compare').setAttribute('aria-pressed', 'false'); schedule(); }
   });
-  window.addEventListener('blur', () => { ui.spaceHeld = false; if (ui.comparing) { ui.comparing = false; schedule(); } });
+  window.addEventListener('blur', () => { ui.spaceHeld = false; ui.shiftHeld = false; ui.altHeld = false; showModifierMode(); if (ui.comparing) { ui.comparing = false; schedule(); } });
 }
 
 function nudge(dx, dy) {
-  const r = selected();
-  if (!r) return;
-  if (r.kind === 'pin') {
-    r.pin.x = clamp(r.pin.x + dx, 0, S.doc.W);
-    r.pin.y = clamp(r.pin.y + dy, 0, S.doc.H);
-    changed();
-    schedule();
-  } else {
-    r.ops.dx += dx;
-    r.ops.dy += dy;
-    invalidate();
+  const ids = selectedIds();
+  if (!ids.length) return;
+  for (const id of ids) {
+    const r = byId(id);
+    if (r.kind === 'pin') {
+      r.pin.x = clamp(r.pin.x + dx, 0, S.doc.W);
+      r.pin.y = clamp(r.pin.y + dy, 0, S.doc.H);
+    } else {
+      r.ops.dx += dx;
+      r.ops.dy += dy;
+    }
   }
+  invalidate();
   commitSoon();
   renderRegionList();
 }
 
 function onKey(e) {
   const k = e.key;
+  if (k === 'Shift' || k === 'Alt') {
+    ui.shiftHeld = e.shiftKey;
+    ui.altHeld = e.altKey;
+    showModifierMode();
+    if (k === 'Alt' && !isTypingTarget(e.target)) e.preventDefault();
+  }
   const mod = e.ctrlKey || e.metaKey;
   if (k === 'Escape') {
     if (!$('help').hidden) return toggleHelp(false);
@@ -1828,7 +2017,7 @@ function onKey(e) {
     case '-': case '_': zoomCenter(0.8); break;
     case '?': toggleHelp(); break;
     case 'Delete': case 'Backspace':
-      if (ui.selectedId) { e.preventDefault(); deleteRegion(ui.selectedId); }
+      if (ui.selectedId) { e.preventDefault(); deleteRegions(selectedIds()); }
       break;
     case 'ArrowLeft': if (ui.selectedId) { e.preventDefault(); nudge(-step, 0); } break;
     case 'ArrowRight': if (ui.selectedId) { e.preventDefault(); nudge(step, 0); } break;
@@ -1850,20 +2039,26 @@ async function boot() {
   updateCursor();
   new ResizeObserver(() => resizeView()).observe($('stage'));
   resizeView();
-  let restored = false;
+  updateDocInfo();
+  updateHandoffButton();
   try {
-    const id = store.prefs.get('lastDoc', null);
-    if (id) {
-      const rec = await store.get(id);
-      if (rec) {
-        await loadRecord(rec);
-        restored = true;
-      }
+    const recent = (await store.all()).find((r) => !r.sample);
+    if (recent) {
+      const btn = $('empty-resume');
+      btn.textContent = `Resume ${recent.name}`;
+      btn.title = `Last edited ${fmtWhen(recent.updated)}`;
+      btn.hidden = false;
+      btn.addEventListener('click', async () => {
+        try {
+          await loadRecord(recent);
+        } catch {
+          toast('That saved image could not be read.');
+        }
+      });
     }
-  } catch (e) {
-    console.warn('BridgeBack: could not restore the last session', e);
+  } catch {
+    /* storage unavailable: stay blank */
   }
-  if (!restored) loadSample();
   document.fonts?.load?.('600 16px "Schibsted Grotesk"').then(() => schedule()).catch(() => {});
   window.__bb = { S, ui, handoff, view, steps, currentPrompt, makeImage };
 }

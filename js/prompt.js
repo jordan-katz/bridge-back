@@ -212,8 +212,18 @@ function intro(images, combine) {
   return `I've attached ${images.length} images. ${parts.join('. ')}.`;
 }
 
+const MATTE_NAMES = { '#ffffff': 'white', '#808080': 'gray', '#000000': 'black' };
+
+function backgroundLine(doc) {
+  if (!doc.hasAlpha) return '';
+  if (!doc.matte || doc.matte === 'transparent') return 'The image has a transparent background. Keep it transparent.';
+  const name = MATTE_NAMES[doc.matte] || `${colorName(doc.matte)} (${doc.matte})`;
+  return `The original has a transparent background, filled with ${name} in these mock-ups. Keep the background a plain, even ${name}.`;
+}
+
 export function buildPrompt(s, handoff) {
   const { W, H } = s.doc;
+  const bg = backgroundLine(s.doc);
   const images = packetImages(handoff, s.regions.length);
   const g = globalLines(s.global);
   const dir = directionLines(s.intent);
@@ -252,6 +262,7 @@ export function buildPrompt(s, handoff) {
     if (!obj.changes.length) delete obj.changes;
     if (!keep.length) delete obj.preserve;
     if (!note) delete obj.notes;
+    if (bg) obj.background = bg;
     return JSON.stringify(obj, null, 2);
   }
 
@@ -261,6 +272,7 @@ export function buildPrompt(s, handoff) {
     if (dir.length) bits.push(dir.join(' '));
     if (regs.length) bits.push('Changes: ' + regs.join(' '));
     if (note) bits.push(sentence(note));
+    if (bg) bits.push(bg);
     bits.push(keep.length ? `Keep everything else as it is, especially ${keep.join(', ')}.` : 'Keep everything else as it is.');
     return bits.join(' ');
   }
@@ -277,6 +289,7 @@ export function buildPrompt(s, handoff) {
     out.push(head + '\n' + regs.join('\n'));
   }
   if (note) out.push('Also: ' + sentence(note));
+  if (bg) out.push(bg);
   out.push(
     keep.length
       ? `Keep everything I haven't mentioned the same as the original, especially ${keep.join(', ')}. Output one image at the same aspect ratio.`
