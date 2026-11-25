@@ -1,24 +1,36 @@
 # BridgeBack
 
-A browser tool for the round trip with AI image generators. Paste the image the AI gave you, rough out the changes you want, and send back a packet the model can follow: your rough edit, a marked-up copy with numbered outlines, and a prompt written from your sliders and notes.
+A browser tool for the round trip with AI image generators. Paste the image the AI gave you, rough out the changes you want, and send back a packet the model can follow: your rough edit, a marked-up copy with numbered marks, and a prompt written from your sliders and notes. When the AI replies, paste its image to start the next round.
 
 The editing is crude on purpose. The AI does the clean render. BridgeBack's job is to make the request unambiguous.
 
-Use it at **[usebridgeback.netlify.app](https://usebridgeback.netlify.app)**. No account, nothing to install.
+Use it at **[usebridgeback.pages.dev](https://usebridgeback.pages.dev)**. No account, nothing to install.
 
 ## What it does
 
-**Global sliders (rendered).** Exposure, contrast, highlights, shadows, saturation, warmth, tint and vignette run on the GPU and show up in the rough edit. The prompt describes them too, so the model keeps the look.
+**Mark what should change.** Smart select picks an object with one click. Lasso, brush, box, ellipse and a magic wand cover everything else. Hold Shift to add to the selected area, Alt to cut away. With the Move tool, Shift-click several marks to move them together or combine areas into one, with one number and one note.
 
-**Direction sliders (prompt only).** How closely to follow the edit, realism, detail, depth of field, lighting drama, mood, light direction, time of day and framing. Plus "keep exactly" checkboxes for faces, text, composition and art style, and a free-text note.
+**Point and write.** Drag an Arrow from a thing to where it should go. Drop a Text note straight onto the image ("too dark here"). Drop a Marker where something new should appear. Each one is numbered, drawn on the marked-up copy, and explained in the prompt.
 
-**Regions.** Select with lasso, ellipse, rectangle or a magic wand (hold Shift to add another piece to the selected area, Alt to cut one away). With the Move tool, Shift-click several areas to move them together or combine them into one area with one number and one note. Each region gets a number, a note and its own edits: recolor (keeps shading), hue, saturation, brightness, scale, rotate, mirror, move, remove, and soft edges. When you move or remove something, the hole is filled from its surroundings as a placeholder and the prompt tells the model to fill it properly. Markers (P) mark a spot where something new should go.
+**Rough it out.** Each area can be recolored (shading is kept), hue-shifted, brightened, scaled, rotated, mirrored, moved or removed, with soft edges. Moved or removed things leave a placeholder fill, and the prompt asks the model to fill it properly.
 
-**Handoff.** `Copy for AI` (Ctrl+Shift+C) copies the next piece each time you press it: rough edit, marked-up copy, prompt. Paste each into the chat. Options for including the original, combining everything into one labeled image, copying the prompt together with the marked-up copy in a single paste, and Detailed, Short or JSON prompts. Everything can also be saved as files.
+**The overall look.** Exposure, contrast, highlights, shadows, saturation, warmth, tint and vignette run on the GPU and show in the rough edit. Direction controls (how closely to follow the edit, realism, detail, depth of field, lighting, mood, light direction, time of day, framing, and what to keep exactly) only shape the prompt.
 
-**Transparent images.** Images with a transparent background are flattened onto white by default, since image models handle transparency unevenly. Pick gray, black, any color, or keep it transparent under Adjust. The prompt says which.
+**Extend the canvas.** Add space on any side, or jump to 1:1, 4:5, 3:2, 16:9 or 9:16. The new area gets a blurred placeholder, the marked-up copy frames the original, and the prompt asks for the scene to continue.
 
-**Quality of life.** Opens blank, with a Resume button for your last image. Paste or drop to open. Undo and redo. Hold `\` to compare with the original. Sessions autosave in the browser (IndexedDB), with the last eight images under Recent. Works on phones and tablets with touch and pinch zoom.
+**Hand it back.** `Copy for AI` (Ctrl+Shift+C) copies the next piece each time you press it. Preview shows every image and the full prompt before you copy. Options for including the original, combining everything into one labeled image, copying the prompt together with the marked-up copy, and Detailed, Short or JSON prompts. Everything can also be saved as files.
+
+**Round by round.** Paste the AI's reply and it becomes the next round. Your marks carry over, switched off. Turn back on any the AI missed and they go out as "still needed". Earlier rounds stay viewable, and you can go back to one.
+
+**Transparent images** are flattened onto white by default, since image models handle transparency unevenly. Pick gray, black, any color, or keep it transparent under Adjust.
+
+**Quality of life.** A one-minute tour on first visit. Undo and redo. Hold `\` to compare with the original. Autosave in the browser, with the last eight images under Recent. Works on phones and tablets with touch and pinch zoom.
+
+## Privacy
+
+Your images never leave your browser. Nothing is uploaded.
+
+Smart select runs the [SlimSAM](https://huggingface.co/Xenova/slimsam-77-uniform) segmentation model on your own device with [transformers.js](https://github.com/huggingface/transformers.js). The first time you use it, the browser downloads the library from jsDelivr and the model (about 14 MB) from Hugging Face, then caches both.
 
 ## Running it
 
@@ -30,31 +42,36 @@ python -m http.server 8080
 # open http://localhost:8080
 ```
 
-ES modules need a server, so opening `index.html` straight from disk will not work.
+ES modules need a server, so opening `index.html` straight from disk will not work. A plain local server skips the headers in `_headers`, so smart select runs on one CPU thread there and is slower than on the live site.
 
 ## Deploying
 
-Netlify serves the repo root as-is (`netlify.toml` sets the publish directory and security headers). Connect the repo in Netlify, or run `netlify deploy --prod` from this folder.
+Cloudflare Pages serves the repo root as-is: no build command, output directory `/`. Every push to `main` deploys. `_headers` sets the security headers, including the content security policy that allows the two hosts smart select loads from, and the cross-origin isolation that lets the model use several CPU threads.
 
 ## Layout
 
 ```
-index.html        markup shell
-css/app.css       all styles, light and dark
-js/main.js        state, UI, pointer and keyboard handling, handoff
-js/regions.js     masks, selection tools, region edits, hole fill, compositing
-js/gl.js          WebGL pass for the global sliders
-js/prompt.js      prompt builder (Detailed, Short, JSON)
-js/export.js      marked-up copy and combined image
-js/store.js       IndexedDB autosave and preferences
-js/sample.js      the sample scene behind "Try the sample"
+index.html            markup shell
+_headers              security headers for Cloudflare Pages
+css/app.css           all styles, light and dark
+js/main.js            state, UI, tools, pointer and keyboard handling, rounds, handoff
+js/regions.js         masks, selection tools, region edits, hole fill, compositing
+js/canvasext.js       canvas extension and its placeholder fill
+js/segment.js         smart select, main-thread side
+js/segment-worker.js  smart select model, runs in a worker
+js/gl.js              WebGL pass for the global sliders
+js/prompt.js          prompt builder (Detailed, Short, JSON)
+js/export.js          marked-up copy, callouts and combined image
+js/tour.js            first-run tour
+js/store.js           IndexedDB autosave and preferences
+js/sample.js          the sample scene behind "Try the sample"
 ```
 
 ## Limits
 
-- Images are worked on at up to 2048 px on the long edge. Most image models downscale below that anyway.
+- Images are worked on at up to 2048 px on the long edge, and up to 3072 px once the canvas is extended. Most image models downscale below that anyway.
+- Smart select analyzes each image once. The first time it also downloads the model, so expect 10 to 30 seconds. After that each click takes well under a second.
 - Copying images to the clipboard needs a browser with the async Clipboard API (current Chrome, Edge, Safari and Firefox). If it is blocked, BridgeBack offers to save the file instead.
-- Everything stays in your browser. Nothing is uploaded.
 
 ## License
 

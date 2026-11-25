@@ -6,6 +6,15 @@ import { isMoved } from './regions.js';
 export const REGION_COLORS = ['#ff2d6f', '#1ea7ff', '#ffb000', '#1fbf5b', '#a95cff', '#ff6a1a', '#00c7b0', '#f24fd0'];
 export const regionColor = (i) => REGION_COLORS[i % REGION_COLORS.length];
 
+/** Marks that go out with the packet. Hidden ones are left out and the rest are numbered in order. */
+const hasAreaEdit = (o) => !!(o.remove || o.dx || o.dy || o.scale !== 100 || o.rotate || o.flipX || (o.recolor && o.recolorAmt > 0) || o.hue || o.sat || o.bright);
+/** A mark that tells the AI nothing yet: an area with no note and no edit, or an empty text note. */
+export const isBlank = (r) => !(r.note || '').trim() && (r.kind === 'text' || (r.kind === 'area' && !hasAreaEdit(r.ops)));
+export const liveRegions = (regions) => regions.filter((r) => r.enabled !== false && !isBlank(r));
+
+const KIND_LABEL = { area: 'Area', pin: 'Marker', arrow: 'Arrow', text: 'Label' };
+export const kindLabel = (r) => KIND_LABEL[r.kind] || 'Mark';
+
 const NAMED = [
   ['black', '#111111'], ['charcoal', '#36454f'], ['dark gray', '#555555'], ['gray', '#8a8a8a'],
   ['silver', '#c0c0c0'], ['white', '#ffffff'], ['off-white', '#f3efe6'], ['cream', '#fff5cc'],
@@ -149,9 +158,10 @@ export function regionEdits(r, W, H) {
 /** One-line label for lists and the legend strip. */
 export function shortSummary(r) {
   if (r.kind === 'pin') return r.note ? r.note.trim() : 'Marker with no note';
+  if (r.kind === 'arrow') return r.note ? r.note.trim() : 'Arrow with no note';
+  if (r.kind === 'text') return r.note ? r.note.trim() : 'Empty label';
   const o = r.ops;
   const bits = [];
-  if (!r.enabled) bits.push('off');
   if (o.remove) bits.push('remove');
   else {
     if (o.recolor && o.recolorAmt > 0) bits.push(`recolor ${colorName(o.recolor)}`);
@@ -166,13 +176,30 @@ export function shortSummary(r) {
   const ops = bits.join(', ');
   const note = (r.note || '').trim();
   if (note && ops) return `${note} · ${ops}`;
-  return note || ops || 'No change yet';
+  return note || ops || 'Needs a note';
+}
+
+function arrowWords(a, W, H) {
+  const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
+  const dir = [];
+  if (Math.abs(dy) > Math.abs(dx) * 0.4) dir.push(dy < 0 ? 'up' : 'down');
+  if (Math.abs(dx) > Math.abs(dy) * 0.4) dir.push(dx < 0 ? 'left' : 'right');
+  const len = Math.round(Math.hypot(dx / W, dy / H) * 100);
+  return `pointing ${dir.join(' and ') || 'across'}, about ${Math.max(1, len)}% of the frame long`;
 }
 
 function regionLine(r, i, W, H) {
   const n = i + 1;
+  const again = r.carried ? 'Still needed from the last round: ' : '';
   if (r.kind === 'pin') {
-    return `${n}. Marker at the ${where(r.pin.x, r.pin.y, W, H)}: ${sentence(r.note) || 'Point of interest (no note given).'}`;
+    return `${n}. Marker at the ${where(r.pin.x, r.pin.y, W, H)}: ${again}${sentence(r.note) || 'Point of interest (no note given).'}`;
+  }
+  if (r.kind === 'text') {
+    return `${n}. Note written on the image at the ${where(r.pin.x, r.pin.y, W, H)}: ${again}${sentence(r.note) || '(empty)'} This note is an instruction, not text to keep in the image.`;
+  }
+  if (r.kind === 'arrow') {
+    const a = r.arrow;
+    return `${n}. Arrow from the ${where(a.x1, a.y1, W, H)} to the ${where(a.x2, a.y2, W, H)} (${arrowWords(a, W, H)}): ${again}${sentence(r.note) || 'Move what is at the tail of the arrow to where it points.'}`;
   }
   const m = r.mask;
   const place = where(m.x + m.w / 2, m.y + m.h / 2, W, H);
@@ -182,7 +209,7 @@ function regionLine(r, i, W, H) {
   if (r.note && r.note.trim()) parts.push(sentence(r.note));
   parts.push(...regionEdits(r, W, H));
   if (!parts.length) parts.push('Marked for attention, no specific change requested.');
-  return `${n}. The ${place} area (about ${pw}% wide, ${ph}% tall): ${parts.join(' ')}`;
+  return `${n}. The ${place} area (about ${pw}% wide, ${ph}% tall): ${again}${parts.join(' ')}`;
 }
 
 /** Which images go out, in order. */
@@ -197,7 +224,7 @@ export function packetImages(handoff, regionCount) {
 const IMG_DESC = {
   original: 'the original image',
   rough: 'my rough edit, a quick mock-up of the changes I want',
-  annotated: 'the same rough edit with a numbered outline around each change',
+  annotated: 'the same rough edit with each change numbered and outlined',
 };
 const PANEL_NAME = { original: 'Original', rough: 'Rough edit', annotated: 'Marked-up' };
 
@@ -221,13 +248,56 @@ function backgroundLine(doc) {
   return `The original has a transparent background, filled with ${name} in these mock-ups. Keep the background a plain, even ${name}.`;
 }
 
+function gcd(a, b) {
+  return b ? gcd(b, a % b) : a;
+}
+
+export function aspectWords(W, H) {
+  const common = [[1, 1], [4, 5], [5, 4], [3, 2], [2, 3], [4, 3], [3, 4], [16, 9], [9, 16], [21, 9], [2, 1], [1, 2]];
+  const r = W / H;
+  for (const [a, b] of common) if (Math.abs(r - a / b) / (a / b) < 0.02) return `${a}:${b}`;
+  const g = gcd(W, H);
+  return W / g <= 40 ? `${W / g}:${H / g}` : `about ${r.toFixed(2)}:1`;
+}
+
+/** Sentence asking the model to extend the canvas, or '' when nothing was added. */
+function extendLine(doc) {
+  const e = doc.ext;
+  if (!e || !(e.t || e.r || e.b || e.l)) return '';
+  const w0 = doc.W - e.l - e.r, h0 = doc.H - e.t - e.b;
+  const sides = [];
+  const pct = (v, of) => `about ${Math.max(1, Math.round((v / of) * 100))}%`;
+  if (e.t) sides.push(`${pct(e.t, h0)} at the top`);
+  if (e.b) sides.push(`${pct(e.b, h0)} at the bottom`);
+  if (e.l) sides.push(`${pct(e.l, w0)} on the left`);
+  if (e.r) sides.push(`${pct(e.r, w0)} on the right`);
+  const list = sides.length > 1 ? sides.slice(0, -1).join(', ') + ' and ' + sides[sides.length - 1] : sides[0];
+  return `Extend the canvas: add ${list}, for a ${aspectWords(doc.W, doc.H)} image. The soft, blurred border in the rough edit is only a placeholder for that new space. Continue the scene into it naturally.`;
+}
+
+function outputLine(doc) {
+  const e = doc.ext;
+  const extended = e && (e.t || e.r || e.b || e.l);
+  return extended
+    ? `Output one image at the new ${aspectWords(doc.W, doc.H)} aspect ratio.`
+    : 'Output one image at the same aspect ratio.';
+}
+
+function roundLine(s) {
+  if (!s.round || s.round < 2) return '';
+  return `This is round ${s.round} of edits. The image I'm attaching is based on your last result, so keep everything you already got right.`;
+}
+
 export function buildPrompt(s, handoff) {
   const { W, H } = s.doc;
   const bg = backgroundLine(s.doc);
-  const images = packetImages(handoff, s.regions.length);
+  const ext = extendLine(s.doc);
+  const rnd = roundLine(s);
+  const live = liveRegions(s.regions);
+  const images = packetImages(handoff, live.length);
   const g = globalLines(s.global);
   const dir = directionLines(s.intent);
-  const regs = s.regions.map((r, i) => regionLine(r, i, W, H));
+  const regs = live.map((r, i) => regionLine(r, i, W, H));
   const keep = Object.keys(PRESERVE).filter((k) => s.intent.preserve[k]).map((k) => PRESERVE[k]);
   const note = (s.note || '').trim();
 
@@ -240,9 +310,17 @@ export function buildPrompt(s, handoff) {
       fidelity: fidelityLine(s.intent.fidelity),
       look_already_applied: g,
       direction: dir,
-      changes: s.regions.map((r, i) => {
+      round: s.round > 1 ? s.round : undefined,
+      extend_canvas: ext || undefined,
+      changes: live.map((r, i) => {
         const base = { number: i + 1 };
+        if (r.carried) base.still_needed_from_last_round = true;
         if (r.kind === 'pin') return { ...base, type: 'marker', position: where(r.pin.x, r.pin.y, W, H), note: r.note || '' };
+        if (r.kind === 'text') return { ...base, type: 'note_on_image', position: where(r.pin.x, r.pin.y, W, H), note: r.note || '' };
+        if (r.kind === 'arrow') {
+          const a = r.arrow;
+          return { ...base, type: 'arrow', from: where(a.x1, a.y1, W, H), to: where(a.x2, a.y2, W, H), note: r.note || '' };
+        }
         const m = r.mask;
         return {
           ...base,
@@ -255,7 +333,7 @@ export function buildPrompt(s, handoff) {
       }),
       preserve: keep,
       notes: note,
-      output: 'One image, same aspect ratio. Do not copy mock-up artifacts such as hard edges or flat patches.',
+      output: `${outputLine(s.doc)} Do not copy mock-up artifacts such as hard edges, flat patches, outlines, arrows or written notes.`,
     };
     if (!g.length) delete obj.look_already_applied;
     if (!dir.length) delete obj.direction;
@@ -268,23 +346,27 @@ export function buildPrompt(s, handoff) {
 
   if (handoff.style === 'short') {
     const bits = [intro(images, handoff.combine), 'Turn it into a clean, finished image.', fidelityLine(s.intent.fidelity)];
+    if (rnd) bits.push(rnd);
+    if (ext) bits.push(ext);
     if (g.length) bits.push(`Keep the adjusted look: ${g.map((x) => x.toLowerCase()).join('; ')}.`);
     if (dir.length) bits.push(dir.join(' '));
     if (regs.length) bits.push('Changes: ' + regs.join(' '));
     if (note) bits.push(sentence(note));
     if (bg) bits.push(bg);
     bits.push(keep.length ? `Keep everything else as it is, especially ${keep.join(', ')}.` : 'Keep everything else as it is.');
+    bits.push(outputLine(s.doc));
     return bits.join(' ');
   }
 
   const out = [];
-  out.push(`${intro(images, handoff.combine)} Please produce a clean, finished version of the image with these changes.`);
-  out.push(`${fidelityLine(s.intent.fidelity)} Don't copy the mock-up's artifacts (hard cut-out edges, flat or smeared patches, uneven color). Every change should look like it was always part of the image.`);
+  out.push(`${intro(images, handoff.combine)} Please produce a clean, finished version of the image with these changes.${rnd ? ' ' + rnd : ''}`);
+  out.push(`${fidelityLine(s.intent.fidelity)} Don't copy the mock-up's artifacts (hard cut-out edges, flat or smeared patches, uneven color, and any outlines, arrows or written notes). Every change should look like it was always part of the image.`);
+  if (ext) out.push(ext);
   if (g.length) out.push('Overall look, already applied in the rough edit. Keep it:\n' + g.map((x) => `- ${x}`).join('\n'));
   if (dir.length) out.push('Direction:\n' + dir.map((x) => `- ${x}`).join('\n'));
   if (regs.length) {
     const head = images.includes('annotated')
-      ? 'Changes, numbered to match the outlines in the marked-up image:'
+      ? 'Changes, numbered to match the marked-up image:'
       : 'Changes:';
     out.push(head + '\n' + regs.join('\n'));
   }
@@ -292,8 +374,8 @@ export function buildPrompt(s, handoff) {
   if (bg) out.push(bg);
   out.push(
     keep.length
-      ? `Keep everything I haven't mentioned the same as the original, especially ${keep.join(', ')}. Output one image at the same aspect ratio.`
-      : "Keep everything I haven't mentioned the same as the original. Output one image at the same aspect ratio."
+      ? `Keep everything I haven't mentioned the same as the original, especially ${keep.join(', ')}. ${outputLine(s.doc)}`
+      : `Keep everything I haven't mentioned the same as the original. ${outputLine(s.doc)}`
   );
   return out.join('\n\n');
 }

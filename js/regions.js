@@ -104,6 +104,81 @@ export function rasterRect(a, bpt, W, H) {
   return makeMask(c, bx, by);
 }
 
+/** A painted brush stroke: round caps and joins, `size` is the brush diameter in image px. */
+export function rasterStroke(pts, size, W, H) {
+  if (!pts.length) return null;
+  const r = size / 2;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }
+  const b = clipBox(x0 - r, y0 - r, x1 + r, y1 + r, W, H);
+  if (!b) return null;
+  const c = makeCanvas(b.w, b.h);
+  const x = c.getContext('2d');
+  x.strokeStyle = x.fillStyle = '#fff';
+  x.lineWidth = size;
+  x.lineCap = 'round';
+  x.lineJoin = 'round';
+  if (pts.length === 1) {
+    x.beginPath();
+    x.arc(pts[0].x - b.x, pts[0].y - b.y, r, 0, Math.PI * 2);
+    x.fill();
+  } else {
+    x.beginPath();
+    pts.forEach((p, i) => (i ? x.lineTo(p.x - b.x, p.y - b.y) : x.moveTo(p.x - b.x, p.y - b.y)));
+    x.stroke();
+  }
+  return makeMask(c, b.x, b.y);
+}
+
+/** Build a mask from a full-image bit array (1 byte per pixel, nonzero = selected). */
+export function maskFromBits(bits, W, H) {
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      if (bits[row + x]) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d');
+  const out = ctx.createImageData(w, h);
+  const od = out.data;
+  for (let y = 0; y < h; y++) {
+    const src = (y + minY) * W + minX;
+    for (let x = 0; x < w; x++) {
+      if (bits[src + x]) {
+        const k = (y * w + x) * 4;
+        od[k] = od[k + 1] = od[k + 2] = od[k + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  return { id: uid(), x: minX, y: minY, w, h, canvas: c };
+}
+
+/** Scale a mask by (sx, sy) into a new image of size W×H. */
+export function scaleMask(m, sx, sy, W, H) {
+  const nx = Math.round(m.x * sx), ny = Math.round(m.y * sy);
+  const nw = Math.max(1, Math.round(m.w * sx)), nh = Math.max(1, Math.round(m.h * sy));
+  const c = makeCanvas(nw, nh);
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = true;
+  x.drawImage(m.canvas, 0, 0, nw, nh);
+  const big = makeCanvas(Math.min(W, nx + nw) - Math.max(0, nx) || 1, Math.min(H, ny + nh) - Math.max(0, ny) || 1);
+  big.getContext('2d').drawImage(c, Math.min(0, nx), Math.min(0, ny));
+  return makeMask(big, Math.max(0, nx), Math.max(0, ny));
+}
+
 /** Combine two masks. mode 'add' unions, 'sub' removes b from a. */
 export function combineMasks(a, b, mode) {
   let x, y, w, h;

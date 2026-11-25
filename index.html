@@ -28,8 +28,11 @@
       <button class="btn" id="btn-outlines" type="button" aria-pressed="true" title="Show outlines and numbers (O)">Outlines</button>
     </div>
     <div class="top-end">
-      <button class="icon-btn" id="btn-help" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><span class="qmark">?</span></button>
-      <button class="btn primary" id="btn-handoff" type="button"><span id="handoff-label">Copy for AI</span><span class="kbd">Ctrl ⇧ C</span></button>
+      <button class="icon-btn" id="btn-help" type="button" aria-label="Help and shortcuts" title="Help and shortcuts (?)"><span class="qmark">?</span></button>
+      <div class="handoff-bar" id="handoff-bar">
+        <button class="btn" id="btn-preview" type="button" title="See exactly what gets sent">Preview</button>
+        <button class="btn primary" id="btn-handoff" type="button"><span id="handoff-label">Copy for AI</span><span class="kbd">Ctrl ⇧ C</span></button>
+      </div>
     </div>
   </header>
 
@@ -40,7 +43,10 @@
     <div class="toolopts" id="toolopts"></div>
     <div class="compare-flag" id="compare-flag" hidden>Original</div>
     <div class="stage-foot">
-      <div class="docinfo" id="docinfo"></div>
+      <div class="foot-left">
+        <button class="btn sm rounds-btn" id="btn-rounds" type="button" aria-expanded="false" aria-controls="rounds-pop" title="Rounds: paste the AI's reply to start the next one" hidden></button>
+        <div class="docinfo" id="docinfo" hidden></div>
+      </div>
       <div class="zoom" aria-label="Zoom">
         <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
         <button type="button" id="zoom-level" title="Zoom to 100% (1)">100%</button>
@@ -51,12 +57,13 @@
     <div class="empty" id="empty">
       <div>
         <h2>Paste, drop or open an image</h2>
-        <p>Rough it up here, then send it back to your AI chat with notes it can follow. <kbd>Ctrl</kbd> <kbd>V</kbd> works anywhere on the page.</p>
+        <p>Mark what should change, then hand it back to your AI chat with notes it can follow. <kbd>Ctrl</kbd> <kbd>V</kbd> works anywhere on the page.</p>
         <div class="row">
           <button class="btn primary" id="empty-open" type="button">Open image</button>
           <button class="btn" id="empty-resume" type="button" hidden></button>
           <button class="btn" id="empty-sample" type="button">Try the sample</button>
         </div>
+        <p class="empty-tour"><button class="link" id="empty-tour" type="button">New here? Take the one-minute tour</button></p>
       </div>
     </div>
   </main>
@@ -76,7 +83,10 @@
 </div>
 
 <input type="file" id="file-input" accept="image/*" hidden>
+<input type="file" id="round-input" accept="image/*" hidden>
 <div class="popover" id="recent-pop" hidden></div>
+<div class="popover" id="rounds-pop" hidden></div>
+<div class="overlay" id="dialog" hidden></div>
 <div class="dropzone" id="dropzone" hidden><div>Drop to open this image</div></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -86,19 +96,23 @@
       <h2 id="help-title">How BridgeBack works</h2>
       <button class="icon-btn" type="button" data-close aria-label="Close"><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></button>
     </div>
-    <p>Paste the image your AI made. Mark what should change, rough it up with the sliders, then press Copy for AI and paste each piece into the chat. The edit only has to be clear. The AI does the clean render.</p>
+    <p>Paste the image your AI made. Mark what should change, rough it up with the sliders, then press Copy for AI and paste each piece into the chat. The edit only has to be clear. The AI does the clean render. When it replies, paste its image to start the next round.</p>
+    <p><button class="btn sm" id="help-tour" type="button">Replay the tour</button></p>
     <dl class="keys">
-      <dt><kbd>Ctrl</kbd> <kbd>V</kbd></dt><dd>Open the image on your clipboard</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>V</kbd></dt><dd>Open an image, or start the next round with the AI's reply</dd>
       <dt><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>C</kbd></dt><dd>Copy the next piece of the handoff</dd>
-      <dt><kbd>V</kbd> <kbd>L</kbd> <kbd>E</kbd> <kbd>M</kbd></dt><dd>Move, lasso, ellipse, rectangle</dd>
-      <dt><kbd>W</kbd> <kbd>P</kbd> <kbd>H</kbd></dt><dd>Magic wand, marker, pan</dd>
-      <dt><kbd>⇧</kbd> / <kbd>Alt</kbd> + drag</dt><dd>Add to or subtract from the selected area</dd>
+      <dt><kbd>V</kbd> <kbd>S</kbd> <kbd>L</kbd> <kbd>B</kbd></dt><dd>Move, smart select, lasso, brush</dd>
+      <dt><kbd>E</kbd> <kbd>M</kbd> <kbd>W</kbd></dt><dd>Ellipse, box, magic wand</dd>
+      <dt><kbd>A</kbd> <kbd>T</kbd> <kbd>P</kbd> <kbd>H</kbd></dt><dd>Arrow, text note, marker, pan</dd>
+      <dt><kbd>[</kbd> / <kbd>]</kbd></dt><dd>Smaller or bigger brush</dd>
+      <dt><kbd>⇧</kbd> / <kbd>Alt</kbd> + select</dt><dd>Add to or subtract from the selected area</dd>
+      <dt><kbd>⇧</kbd> + click with Move</dt><dd>Select several marks</dd>
       <dt><kbd>Space</kbd> + drag</dt><dd>Pan from any tool</dd>
       <dt>Hold <kbd>\</kbd></dt><dd>Compare with the original</dd>
       <dt><kbd>O</kbd></dt><dd>Show or hide outlines</dd>
       <dt><kbd>0</kbd> / <kbd>1</kbd></dt><dd>Fit to screen / 100%</dd>
-      <dt>Arrows</dt><dd>Nudge the selected area (Shift for 10 px)</dd>
-      <dt><kbd>Del</kbd></dt><dd>Delete the selected area or marker</dd>
+      <dt>Arrow keys</dt><dd>Nudge the selection (Shift for 10 px)</dd>
+      <dt><kbd>Del</kbd></dt><dd>Delete the selected marks</dd>
       <dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo (add Shift to redo)</dd>
       <dt>Double-click a slider label</dt><dd>Reset it</dd>
     </dl>

@@ -106,6 +106,8 @@ export function sampleScene() {
       door: { a: { x: 733, y: 588 }, b: { x: 807, y: 734 } },
       tree: { a: { x: 170, y: 300 }, b: { x: 470, y: 735 } },
       step: { x: 770, y: 728 },
+      sunArrow: { x1: 1230, y1: 330, x2: 1170, y2: 470 },
+      skyNote: { x: 560, y: 70 },
     },
   };
 }
