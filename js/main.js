@@ -2060,7 +2060,6 @@ async function boot() {
     /* storage unavailable: stay blank */
   }
   document.fonts?.load?.('600 16px "Schibsted Grotesk"').then(() => schedule()).catch(() => {});
-  window.__bb = { S, ui, handoff, view, steps, currentPrompt, makeImage };
 }
 
 boot();

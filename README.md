@@ -4,6 +4,8 @@ A browser tool for the round trip with AI image generators. Paste the image the 
 
 The editing is crude on purpose. The AI does the clean render. BridgeBack's job is to make the request unambiguous.
 
+Use it at **[usebridgeback.netlify.app](https://usebridgeback.netlify.app)**. No account, nothing to install.
+
 ## What it does
 
 **Global sliders (rendered).** Exposure, contrast, highlights, shadows, saturation, warmth, tint and vignette run on the GPU and show up in the rough edit. The prompt describes them too, so the model keeps the look.
@@ -45,7 +47,7 @@ js/gl.js          WebGL pass for the global sliders
 js/prompt.js      prompt builder (Detailed, Short, JSON)
 js/export.js      marked-up copy and combined image
 js/store.js       IndexedDB autosave and preferences
-js/sample.js      the sample scene shown on first load
+js/sample.js      the sample scene behind "Try the sample"
 ```
 
 ## Limits
@@ -53,3 +55,7 @@ js/sample.js      the sample scene shown on first load
 - Images are worked on at up to 2048 px on the long edge. Most image models downscale below that anyway.
 - Copying images to the clipboard needs a browser with the async Clipboard API (current Chrome, Edge, Safari and Firefox). If it is blocked, BridgeBack offers to save the file instead.
 - Everything stays in your browser. Nothing is uploaded.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Free to use, change and share.
